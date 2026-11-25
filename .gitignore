@@ -1,0 +1,5 @@
+# Your show scripts stay out of git.
+pdfs/*
+!pdfs/README.md
+.env
+data/

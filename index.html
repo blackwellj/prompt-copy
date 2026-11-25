@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
+<title>PDF Prompt Copy</title>
+<meta name="theme-color" content="#20232a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Prompt Copy">
+<link rel="apple-touch-icon" sizes="180x180" href="/prompt-icon-180.png">
+<link rel="icon" href="/prompt-icon-192.png" type="image/png">
+<link rel="manifest" href="/manifest.webmanifest">
+<style>
+*{box-sizing:border-box;touch-action:manipulation}
+body{margin:0;background:#15171b;color:#f0f2f5;font:16px system-ui,sans-serif}
+header{position:sticky;top:0;z-index:1;background:#20232a;padding:.65rem max(1rem,calc((100% - 58rem)/2));box-shadow:0 2px 8px #0007}
+.bar,.timers,.controls{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem 1rem}
+.bar{justify-content:space-between}
+.timers{margin:.5rem 0;font-variant-numeric:tabular-nums}
+.timer{color:#ccd0da;white-space:nowrap}
+.timer.active{color:#ffe18d}
+button{font:inherit;border:1px solid #666e80;border-radius:.35rem;background:#303540;color:inherit;padding:.35rem .65rem;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+main{max-width:58rem;margin:auto;padding:.6rem .5rem 45vh}
+.sheet{position:relative;isolation:isolate;background:#fff;margin-bottom:1rem;scroll-margin-top:var(--prompt-top,10rem)}
+.sheet img{position:absolute;inset:0;display:block;width:100%;height:100%}
+.box{position:absolute;pointer-events:none;scroll-margin-top:var(--prompt-top,10rem);--wash:#ffc34029;--edge:#875000}
+.box.blue{--wash:#47a5ff32;--edge:#0055ad}
+.box.pink{--wash:#ff63ad32;--edge:#a00051}
+main.inverted .sheet{background:#000}
+main.inverted .sheet img{filter:invert(1)}
+main.inverted .box{--edge:#ffe09a}
+main.inverted .box.blue{--edge:#80caff}
+main.inverted .box.pink{--edge:#ff99ca}
+.box.speech,.box.active-box{background:var(--wash)}
+.box.active-box{z-index:1;box-shadow:inset 0 0 0 3px var(--edge)}
+.prompt-nav{position:fixed;inset:auto 0 0;z-index:2;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,3fr);gap:.65rem;background:#20232a;border-top:1px solid #484e58;padding:.55rem max(.75rem,env(safe-area-inset-right)) calc(.55rem + env(safe-area-inset-bottom)) max(.75rem,env(safe-area-inset-left))}
+.prompt-nav[hidden]{display:none}
+.prompt-nav button{min-height:clamp(60px,9dvh,90px);font-size:clamp(1.15rem,3vw,1.6rem);font-weight:700;touch-action:manipulation}
+.prompt-nav [data-action="next"]{background:#b4dcff;color:#102335;border-color:#b4dcff}
+.prompt-nav button.armed{background:#ffb04d;color:#231600;border-color:#ffb04d}
+main.controlling{padding-bottom:calc(45vh + 7rem + env(safe-area-inset-bottom))}
+header{padding-left:max(1rem,env(safe-area-inset-left),calc((100% - 58rem)/2));padding-right:max(1rem,env(safe-area-inset-right),calc((100% - 58rem)/2))}
+@media (orientation:portrait){.prompt-nav{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}}
+#status{font-size:.88rem;color:#d5d9e2}
+kbd{font:inherit;color:#c4cada}
+main.stage{isolation:isolate;overflow-anchor:none;max-width:76rem}
+.stage-page{position:relative;display:grid;grid-template-columns:minmax(0,1fr) clamp(6.5rem,24%,16rem);align-items:start;margin-bottom:1rem}
+.stage-page .sheet{margin-bottom:0}
+.cue-margin{position:relative;min-height:100%;background:#20232a}
+.stage-cue{position:absolute;left:.35rem;right:.35rem;z-index:2}
+.stage-cue{overflow-wrap:anywhere;background:#16477b;color:white;font-size:clamp(.72rem,1.6vw,.95rem);padding:.25rem .4rem;border:1px solid #9aceff;border-radius:.35rem}
+.cue-description{margin:.25rem 0 0;white-space:pre-wrap}
+.cue-leader{position:absolute;height:1px;transform-origin:left center;background:#71bbff;pointer-events:none;z-index:1}
+.cue-anchor{position:absolute;width:5px;height:5px;border-radius:50%;background:#71bbff;transform:translate(-50%,-50%);pointer-events:none;z-index:1}
+#stage-bar{display:flex;align-items:center;gap:1rem}
+#next-cue{margin-left:auto;font-weight:600;color:#9fd6ff;white-space:nowrap}
+header a{color:#d4e6ff}
+#stage-bar[hidden]{display:none}
+#camera-panel{margin:.45rem 0 0}
+#camera-panel img,#camera-panel iframe{display:block;width:min(100%,28rem,48dvh);aspect-ratio:16/9;border:0;background:#080b11;object-fit:contain}
+#camera-panel p{margin:.25rem 0;color:#f3cc88}
+</style>
+<header>
+  <div class="bar" id="control-bar" style="display:none"><strong id="script-title">PDF Prompt Copy</strong><span id="status" role="status">Connecting…</span><button id="invert" type="button" aria-pressed="false">Invert PDF colours</button></div>
+  <div id="stage-bar" hidden><button id="resync" type="button">Resync</button><a href="/timings">Timings</a><span id="stage-status" role="status"></span><b id="next-cue"></b></div>
+  <div class="timers">
+    <span class="timer" data-phase="act1">Act 1 <b>00:00</b></span>
+    <span class="timer" data-phase="interval">Interval <b>00:00</b></span>
+    <span class="timer" data-phase="act2">Act 2 <b>00:00</b></span>
+    <span class="timer" data-phase="total">Total <b>00:00</b></span>
+    <span class="timer">Clock <time id="wall-clock"></time></span>
+    <button id="camera-toggle" type="button" aria-controls="camera-panel" aria-expanded="false" hidden>Show camera</button>
+  </div>
+  <div class="controls" id="controls" hidden style="display:none">
+    <button data-action="clock">Start timer</button><button data-action="restart">Restart</button>
+    <a id="viewer" href="/" target="_blank" rel="noopener" style="color:#d4e6ff">Open viewer</a>
+    <a href="/timings">Timings</a>
+    <span id="recovery" hidden><button id="resume-show" type="button">Resume Show</button> <button id="use-live" type="button">Use server position</button></span>
+    <kbd>Space to advance · Shift+Space to go back</kbd>
+  </div>
+  <div id="camera-panel" hidden></div>
+</header>
+<main aria-label="Original PDF pages"></main>
+
+<nav class="prompt-nav" id="prompt-nav" aria-label="Prompt navigation" hidden>
+  <button data-action="back" type="button" disabled>Back</button>
+  <button data-action="next" type="button" disabled>Start Show</button>
+</nav>
+<script src="/show-state.js"></script>
+<script>
+const controlling = /^\/control\/?$/.test(location.pathname)
+const header = document.querySelector('header')
+const stage = /^\/stage\/?$/.test(location.pathname)
+const character = !stage && !controlling && location.pathname !== '/'
+  ? decodeURIComponent(location.pathname.replace(/^\/|\/$/g,'')).trim().toUpperCase()
+  : ''
+if (character) {
+  header.hidden = true
+  document.title = character+' | Script'
+}
+const status = document.querySelector('#status')
+const controls = document.querySelector('#controls')
+const navigation = document.querySelector('#prompt-nav')
+const buttons = Object.fromEntries([...document.querySelectorAll('button[data-action]')].map(button => [button.dataset.action,button]))
+const wallClock = document.querySelector('#wall-clock')
+const clockFormat = new Intl.DateTimeFormat('en-GB', {
+  timeZone:'Europe/London', hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23'
+})
+function updateWallClock() {
+  const value = clockFormat.format(Date.now())
+  wallClock.textContent = value
+  wallClock.dateTime = value
+}
+updateWallClock()
+if (!character) setInterval(updateWallClock,250)
+const timers = [...document.querySelectorAll('.timer[data-phase]')]
+const main = document.querySelector('main')
+const invertButton = document.querySelector('#invert')
+const preferenceKey = 'prompt-copy-invert-'+(stage ? 'stage' : controlling ? 'control' : 'viewer')
+function setInverted(inverted) {
+  main.classList.toggle('inverted',inverted)
+  invertButton.setAttribute('aria-pressed',String(inverted))
+}
+const invertParam = new URLSearchParams(location.search).get('invert')
+if (invertParam === '1' || invertParam === '0') {
+  setInverted(invertParam === '1')
+} else {
+  try {
+    const saved = localStorage.getItem(preferenceKey)
+    setInverted(saved === null ? stage : saved === 'true')
+  } catch {setInverted(stage)}
+}
+invertButton.addEventListener('click',() => {
+  const inverted = !main.classList.contains('inverted')
+  setInverted(inverted)
+  try {
+    localStorage.setItem(preferenceKey,String(inverted))
+  } catch {}
+  invertButton.blur()
+})
+new ResizeObserver(() => document.documentElement.style.setProperty('--prompt-top',header.offsetHeight+12+'px')).observe(header)
+function format(ms) {
+  const seconds = Math.floor(ms/1000)
+  const h = Math.floor(seconds/3600)
+  const m = Math.floor(seconds/60)%60
+  const s = seconds%60
+  return (h ? h+':' : '')+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')
+}
+
+function setupCamera(camera) {
+  const button = document.querySelector('#camera-toggle')
+  const panel = document.querySelector('#camera-panel')
+  button.hidden = false
+  const url = new URL(camera.url)
+  function showMessage(text) {
+    const message = document.createElement('p')
+    message.textContent = text
+    panel.replaceChildren(message)
+  }
+  function toggle(visible) {
+    panel.hidden = !visible
+    button.setAttribute('aria-expanded',String(visible))
+    button.textContent = visible ? 'Hide camera' : 'Show camera'
+    panel.replaceChildren()
+    if (!visible) return
+    if (location.protocol === 'https:' && url.protocol === 'http:') {
+      showMessage('This HTTPS page needs an HTTPS camera feed.')
+      return
+    }
+    const feed = document.createElement(camera.mode === 'embed' ? 'iframe' : 'img')
+    if (camera.mode === 'embed') {
+      feed.title = 'Stage camera'
+      feed.allow = 'autoplay; fullscreen'
+    } else {
+      feed.alt = 'Stage camera'
+      feed.addEventListener('error',()=>showMessage('Camera unavailable on this device.'),{once:true})
+    }
+    feed.referrerPolicy = 'no-referrer'
+    feed.src = url.href
+    panel.append(feed)
+  }
+  button.addEventListener('click',()=>toggle(panel.hidden))
+  if (new URLSearchParams(location.search).get('camera')==='1') toggle(true)
+}
+
+async function start() {
+  if ('wakeLock' in navigator) {
+    const requestWakeLock = async () => {
+      try { await navigator.wakeLock.request('screen') } catch {}
+    }
+    requestWakeLock()
+    document.addEventListener('visibilitychange',() => {
+      if (document.visibilityState === 'visible') requestWakeLock()
+    })
+  }
+  const response = await fetch('/setup')
+  if (!response.ok) throw new Error()
+  const {pages,stops,title,camera,revision} = await response.json()
+  document.querySelector('#script-title').textContent = title
+  if (camera && !controlling && !character) setupCamera(camera)
+  const sheets = pages.map(([width,height],index) => {
+    const sheet = document.createElement('section')
+    sheet.className = 'sheet'
+    sheet.style.aspectRatio = width+'/'+height
+    const image = document.createElement('img')
+    image.dataset.url = '/page/'+index+'.png'
+    if (!controlling) image.src = image.dataset.url
+    image.alt = 'PDF page '+(index+1)
+    image.loading = controlling ? 'eager' : 'lazy'
+    image.width = width
+    image.height = height
+    sheet.append(image)
+    return sheet
+  })
+  let previousSpeaker
+  let blue = false
+  const boxesByStop = stops.map(stop => {
+    const speech = !stop.pageStop && (stop.phase === 'act1' || stop.phase === 'act2')
+    if (character && (!speech || stop.speaker.trim().toUpperCase() !== character)) return []
+    if (speech && stop.speaker !== previousSpeaker) {
+      blue = !blue
+      previousSpeaker = stop.speaker
+    }
+    return stop.boxes.map(([page,x,y,w,h]) => {
+      const [width,height] = pages[page]
+      const box = document.createElement('div')
+      box.className = speech ? 'box speech '+(character || blue ? 'blue' : 'pink') : 'box'
+      Object.assign(box.style,{left:100*x/width+'%',top:100*y/height+'%',width:100*w/width+'%',height:100*h/height+'%'})
+      sheets[page].append(box)
+      return box
+    })
+  })
+  let stageCues = null
+  if (stage) {
+    const cueResponse = await fetch('/stage-cues')
+    if (!cueResponse.ok) throw new Error()
+    stageCues = await cueResponse.json()
+    main.classList.add('stage')
+    const stagePages = sheets.map(sheet => {
+      const page = document.createElement('section')
+      const margin = document.createElement('aside')
+      page.className = 'stage-page'
+      margin.className = 'cue-margin'
+      page.append(sheet,margin)
+      return {page,margin,markers:[]}
+    })
+    for (const cue of stageCues) {
+      const {page,margin,markers} = stagePages[cue.page]
+      const marker = document.createElement('div')
+      const heading = document.createElement('strong')
+      const leader = document.createElement('span')
+      const bend = document.createElement('span')
+      const anchor = document.createElement('span')
+      const label = [cue.number,cue.notes].filter(Boolean).join(' · ') || 'Cue'
+      marker.className = 'stage-cue'
+      leader.className = bend.className = 'cue-leader'
+      anchor.className = 'cue-anchor'
+      heading.textContent = label
+      marker.append(heading)
+      if (cue.description) {
+        const description = document.createElement('p')
+        description.className = 'cue-description'
+        description.textContent = cue.description
+        marker.append(description)
+      }
+      margin.append(marker)
+      page.append(leader,bend,anchor)
+      markers.push({cue,marker,leader,bend,anchor})
+    }
+    main.replaceChildren(...stagePages.map(({page}) => page))
+    stagePages.forEach(({margin,markers},index) => {
+      if (!markers.length) return
+      const sheet = sheets[index]
+      function placeCues() {
+        const width = sheet.clientWidth
+        const height = sheet.clientHeight
+        let bottom = 0
+        for (const {cue,marker,leader,bend,anchor} of markers) {
+          const x = width * cue.x/100
+          const y = height * cue.y/100
+          const top = Math.max(bottom,y-marker.offsetHeight/2)
+          marker.style.top = top+'px'
+          bottom = top+marker.offsetHeight+5
+          const dx = marker.offsetLeft
+          const dy = top+marker.offsetHeight/2-y
+          Object.assign(anchor.style,{left:x+'px',top:y+'px'})
+          Object.assign(leader.style,{left:x+'px',top:y+'px',width:Math.max(0,width-x)+'px'})
+          Object.assign(bend.style,{left:width+'px',top:y+'px',width:Math.hypot(dx,dy)+'px',transform:'rotate('+Math.atan2(dy,dx)+'rad)'})
+        }
+        margin.style.height = Math.max(height,bottom)+'px'
+      }
+      const observer = new ResizeObserver(placeCues)
+      observer.observe(sheet)
+      for (const {marker} of markers) observer.observe(marker)
+      placeCues()
+    })
+  } else main.replaceChildren(...sheets)
+  if (!controlling) {
+    window.addEventListener('keydown',event => {
+      if (event.code === 'KeyI' && !event.repeat &&
+          !event.altKey && !event.ctrlKey && !event.metaKey) invertButton.click()
+    })
+  }
+  if (character) return
+  if (controlling) {
+    document.querySelector('#control-bar').style.removeProperty('display')
+    main.classList.add('controlling')
+    navigation.hidden = false
+    navigation.addEventListener('click',event => {
+      const action = event.target.closest('button')?.dataset.action
+      if (action) command(action)
+    })
+    controls.hidden = false
+    controls.style.removeProperty('display')
+    controls.addEventListener('click',event => {
+      const action = event.target.closest('button')?.dataset.action
+      if (action) command(action)
+    })
+    window.addEventListener('keydown',event => {
+      if (event.code !== 'Space' || event.altKey || event.ctrlKey || event.metaKey ||
+          event.target.closest('input,textarea,select,[contenteditable]')) return
+      event.preventDefault()
+      if (!event.repeat) command(event.shiftKey ? 'back' : 'next')
+    })
+  }
+  let state
+  let following = true
+  let followedScroll = window.scrollY
+  const stageStatus = document.querySelector('#stage-status')
+  function browseAhead() {
+    following = false
+    stageStatus.textContent = 'Browsing script'
+  }
+  function jumpToLive() {
+    boxesByStop[state?.index]?.[0]?.scrollIntoView({block:'start'})
+    followedScroll = window.scrollY
+  }
+  if (stage) {
+    document.querySelector('#stage-bar').hidden = false
+    stageStatus.textContent = 'Connecting…'
+    window.addEventListener('scroll',()=>{
+      if (following && Math.abs(window.scrollY-followedScroll)>2) browseAhead()
+    },{passive:true})
+    document.querySelector('#resync').addEventListener('click',()=>{
+      following = true
+      stageStatus.textContent = online ? 'Following live' : 'Showing last live position'
+      jumpToLive()
+    })
+  }
+  let receivedAt
+  let online = false
+  let pending = false
+  const completedShows = []
+  const recovery = document.querySelector('#recovery')
+  const checkpointKey = 'prompt-copy-pending-'+revision
+  let localCheckpoint
+  if (controlling) {
+    try {
+      localCheckpoint = JSON.parse(localStorage.getItem(checkpointKey))
+    } catch {}
+    if (localCheckpoint?.state?.revision === revision && stops[localCheckpoint.state.index]) {
+      recovery.hidden = false
+    } else {
+      localCheckpoint = null
+    }
+  }
+  function persistPending() {
+    try {
+      if (!pending && !syncing && !completedShows.length) localStorage.removeItem(checkpointKey)
+      else localStorage.setItem(checkpointKey,JSON.stringify({
+        state:currentSnapshot(), savedAt:Date.now(), completedShows
+      }))
+    } catch {}
+  }
+  if (controlling) {
+    document.querySelector('#resume-show').addEventListener('click',()=>{
+      const {state:next,savedAt,completedShows:archived} = localCheckpoint
+      if (next.running) next.timers[stops[next.index].phase] += Math.max(0,Date.now()-savedAt)
+      completedShows.push(...archived)
+      localCheckpoint = null
+      recovery.hidden = true
+      pending = true
+      apply(next)
+      persistPending()
+      sync()
+    })
+    document.querySelector('#use-live').addEventListener('click',()=>{
+      localCheckpoint = null
+      recovery.hidden = true
+      persistPending()
+    })
+  }
+  let syncing = false
+  let changedServer = false
+  const images = sheets.map(sheet=>sheet.querySelector('img'))
+  let readyPages = 0
+  let saving = false
+  async function savePages() {
+    if (saving || changedServer || readyPages === images.length) return
+    saving = true
+    try {
+      for (const image of images) {
+        if (image.hasAttribute('src')) continue
+        const response = await fetch(image.dataset.url,{signal:AbortSignal.timeout(10000)})
+        if (!response.ok) throw new Error()
+        image.src = URL.createObjectURL(await response.blob())
+        readyPages++
+        renderStatus()
+      }
+    } catch {} finally {
+      saving = false
+    }
+  }
+  if (controlling) setInterval(savePages,2000)
+  function renderStatus() {
+    if (!state) return
+    const role = controlling ? 'Control' : 'Following'
+    const connection = changedServer ? ' · Server restarted; reload to rejoin' :
+      online ? '' : ' · Offline'
+    const cache = controlling ? (readyPages===images.length ? ' · Offline ready' : ' · Pages saved '+readyPages+'/'+images.length) : ''
+    status.textContent = role+' · '+stops[state.index].speaker+connection+cache
+  }
+  function currentSnapshot() {
+    const timers = {...state.timers}
+    if (state.running) timers[stops[state.index].phase] += performance.now()-receivedAt
+    return {...state,timers}
+  }
+  let armedBoundary = null
+  let armedAt = 0
+  let disarmTimer = 0
+  function renderNextButton() {
+    if (!state) return
+    const stop = stops[state.index]
+    const nextStop = stops[state.index+1]
+    const base = !nextStop ? 'Show Finished'
+      : !state.hasStarted ? 'Start Show'
+      : nextStop.phase === 'interval' && stop.phase !== 'interval' ? 'Start Interval'
+      : nextStop.phase === 'act2' && stop.phase !== 'act2' ? 'Start Act 2'
+      : nextStop.phase === 'finished' ? 'End Show' : 'Next'
+    buttons.next.textContent = armedBoundary ? 'Confirm: '+base : base
+    buttons.next.classList.toggle('armed', Boolean(armedBoundary))
+  }
+  function disarm() {
+    clearTimeout(disarmTimer)
+    if (!armedBoundary) return
+    armedBoundary = null
+    renderNextButton()
+  }
+  function command(action) {
+    if (!state || localCheckpoint || buttons[action].disabled) return
+    if (action==='restart' && !confirm('Restart from the first speaker and reset all timers?')) return
+    if (action==='next') {
+      const stop = stops[state.index]
+      const nextStop = stops[state.index+1]
+      const boundary = !state.hasStarted ? 'start'
+        : nextStop && nextStop.phase !== stop.phase &&
+          (nextStop.phase === 'interval' || nextStop.phase === 'act2' || nextStop.phase === 'finished')
+          ? nextStop.phase : null
+      if (boundary && armedBoundary !== boundary) {
+        armedBoundary = boundary
+        armedAt = performance.now()
+        clearTimeout(disarmTimer)
+        disarmTimer = setTimeout(disarm, 6000)
+        renderNextButton()
+        return
+      }
+      if (boundary && performance.now()-armedAt < 500) return
+    }
+    disarm()
+    pending = true
+    const next = {...advanceShow(currentSnapshot(),action,stops), revision:state.revision}
+    if (next.endedAt && !state.endedAt) completedShows.push(next)
+    apply(next)
+    persistPending()
+    sync()
+  }
+  async function sync() {
+    if ((!pending && !completedShows.length) || syncing || changedServer) return
+    pending = false
+    syncing = true
+    try {
+      while (completedShows.length) {
+        const archive = await fetch('/timings',{
+          method:'POST', headers:{'X-Prompt-Control':'1','Content-Type':'application/json'},
+          body:JSON.stringify(completedShows[0]), signal:AbortSignal.timeout(3500)
+        })
+        if (archive.status===409) {
+          changedServer = true
+          return
+        }
+        if (!archive.ok) throw new Error()
+        completedShows.shift()
+        persistPending()
+      }
+      const response = await fetch('/sync',{
+        method:'POST', headers:{'X-Prompt-Control':'1','Content-Type':'application/json'},
+        body:JSON.stringify(currentSnapshot()), signal:AbortSignal.timeout(3500)
+      })
+      if (response.status===409) {
+        changedServer = true
+        return
+      }
+      if (!response.ok) throw new Error()
+      online = true
+    } catch {
+      pending = true
+      online = false
+    } finally {
+      syncing = false
+      persistPending()
+      renderStatus()
+    }
+  }
+  if (controlling) {
+    setInterval(sync,1000)
+    window.addEventListener('pagehide',()=>{
+      if (!localCheckpoint && state) persistPending()
+    })
+  }
+  function renderTimers() {
+    if (!state) return
+    const phase = stops[state.index].phase
+    const totals = {...state.timers}
+    if (state.running) totals[phase] += performance.now()-receivedAt
+    totals.total = totals.act1+totals.interval+totals.act2
+    for (const timer of timers) {
+      const name = timer.dataset.phase
+      timer.classList.toggle('active',name===phase)
+      timer.querySelector('b').textContent = format(totals[name])
+    }
+  }
+  const nextCueEl = document.querySelector('#next-cue')
+  function renderNextCue() {
+    if (!stage || !stageCues || !state) return
+    const stop = stops[state.index]
+    const box = stop.boxes && stop.boxes[0]
+    if (!box) { nextCueEl.textContent = ''; return }
+    const page0 = box[0]
+    const curY = 100*box[2]/pages[page0][1]
+    const next = stageCues.find(c => c.page > page0 || (c.page === page0 && c.y > curY))
+    if (!next) { nextCueEl.textContent = 'No more cues'; return }
+    const dist = (next.page - page0) + (next.y - curY)/100
+    const label = [next.number,next.notes].filter(Boolean).join(' · ')
+    let near
+    if (dist < 0.08) near = 'just ahead'
+    else if (dist < 1) {
+      const quarter = Math.round(dist*4)/4
+      near = quarter === 0.25 ? '¼ page ahead' : quarter === 0.5 ? '½ page ahead'
+        : quarter === 0.75 ? '¾ page ahead' : 'less than a page ahead'
+    } else near = (Math.round(dist*10)/10)+' pages ahead'
+    nextCueEl.textContent = 'Next cue: '+label+' — '+near
+  }
+  setInterval(renderTimers,200)
+  const events = new EventSource('/events')
+  function apply(next) {
+    const oldState = state
+    state = next
+    receivedAt = performance.now()
+    const stop = stops[state.index]
+    renderStatus()
+    buttons.back.disabled = state.index===0
+    const nextStop = stops[state.index+1]
+    buttons.next.disabled = !nextStop
+    renderNextButton()
+    buttons.clock.disabled = stop.phase==='finished'
+    buttons.clock.textContent = state.running ? 'Pause timer' : 'Start timer'
+    renderTimers()
+    renderNextCue()
+    if (oldState?.index===state.index && oldState.resetCount===state.resetCount) return
+    if (oldState) {
+      for (const box of boxesByStop[oldState.index]) box.classList.remove('active-box')
+    }
+    const activeBoxes = boxesByStop[state.index]
+    for (const box of activeBoxes) box.classList.add('active-box')
+    if (following) jumpToLive()
+  }
+  events.onmessage = event => {
+    online = true
+    if (stage && following) stageStatus.textContent = 'Following live'
+    const update = JSON.parse(event.data)
+    if (controlling && state && update.revision !== state.revision) {
+      changedServer = true
+    }
+    if (controlling && !changedServer) savePages()
+    if (!controlling || (!pending && !syncing && !changedServer)) apply(update)
+    renderStatus()
+  }
+  events.onerror = () => {
+    if (stage && following) stageStatus.textContent = 'Showing last live position'
+    online = false
+    renderStatus()
+  }
+}
+start().catch(() => {main.textContent='Could not load the PDF preview'})
+</script>
+</html>

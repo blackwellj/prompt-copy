@@ -48,6 +48,10 @@ Open `/stage` for the live viewer with right margin cue labels connected to thei
 for normal colours. Scroll to
 browse independently and tap **Resync** to jump back and follow live.
 
+Open `/script.pdf` for a printable copy of the script with every cue: a numbered
+box in the margin level with its line, a leader to the exact pin position, and a
+cue legend under each page. Vector-quality, black on white for clean printing.
+
 Screens stay awake while a view is open, where the browser supports wake locks.
 
 For iPad Home Screen use, open the view you want in Safari before adding it.

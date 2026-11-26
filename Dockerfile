@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
     && python3 -m venv /opt/prompt-python \
     && /opt/prompt-python/bin/pip install --no-cache-dir PyMuPDF==1.26.6
 WORKDIR /app
-COPY manifest.webmanifest prompt-icon-*.png show-state.js prompt-copy.cjs index.html build-speaker-index.py entrypoint.sh ./
+COPY manifest.webmanifest prompt-icon-*.png show-state.js prompt-copy.cjs index.html build-speaker-index.py generate-script-pdf.py entrypoint.sh ./
 RUN chmod 755 /app/entrypoint.sh && mkdir /app/data && chown node:node /app/data
 USER node
 ENV PORT=3000 BIND=0.0.0.0 PAGE_DIRECTORY=/tmp/prompt-pages

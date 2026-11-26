@@ -114,7 +114,7 @@ function timingsPage() {
       +phases.map(key=>'<td>'+duration(averages[key])+'</td>').join('')
       +'<td>'+duration(phases.reduce((sum,key)=>sum+averages[key],0))+'</td></tr></tfoot>'
     : ''
-  return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Show timings</title><style>body{margin:2rem;background:#15171b;color:#f0f2f5;font:16px system-ui}a{color:#a8d1ff}section{overflow:auto}table{border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{text-align:left;padding:.65rem;border-bottom:1px solid #555;white-space:nowrap}small{font-size:.75rem;font-weight:400}small.ahead{color:#7bd88a}small.behind{color:#f3cc88}tfoot td{font-weight:700;border-top:2px solid #777}</style><main><h1>Show timings</h1><p><a href="/control">Control</a> · <a href="/">Viewer</a> · <a href="/stage">Stage</a></p><p>Start and finish shown in UK time. Green = faster than average, amber = slower.</p><section><table><thead><tr>'+['Show','Date','Start','Finish','Act 1','Interval','Act 2','Total'].map(label=>'<th scope="col">'+label+'</th>').join('')+'</tr></thead><tbody>'+(rows||'<tr><td colspan="8">No completed shows yet.</td></tr>')+'</tbody>'+foot+'</table></section></main></html>'
+  return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Show timings</title><style>body{margin:2rem;background:#15171b;color:#f0f2f5;font:16px system-ui}a{color:#a8d1ff}section{overflow:auto}table{border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{text-align:left;padding:.65rem;border-bottom:1px solid #555;white-space:nowrap}small{font-size:.75rem;font-weight:400}small.ahead{color:#7bd88a}small.behind{color:#f3cc88}tfoot td{font-weight:700;border-top:2px solid #777}</style><main><h1>Show timings</h1><p><a href="/control">Control</a> · <a href="/">Viewer</a> · <a href="/stage">Stage</a> · <a href="/script.pdf">Script PDF (with cues)</a></p><p>Start and finish shown in UK time. Green = faster than average, amber = slower.</p><section><table><thead><tr>'+['Show','Date','Start','Finish','Act 1','Interval','Act 2','Total'].map(label=>'<th scope="col">'+label+'</th>').join('')+'</tr></thead><tbody>'+(rows||'<tr><td colspan="8">No completed shows yet.</td></tr>')+'</tbody>'+foot+'</table></section></main></html>'
 }
 
 function send(res) {
@@ -135,6 +135,13 @@ createServer(async (req,res) => {
     }
     if (path === '/timings') return res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}).end(timingsPage())
     if (path === '/show-state.js') return res.writeHead(200,{'Content-Type':'application/javascript'}).end(readFileSync(join(__dirname,'show-state.js')))
+    if (path === '/script.pdf') {
+      try {
+        return res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'inline; filename="script-with-cues.pdf"'}).end(readFileSync(join(pageDirectory,'script.pdf')))
+      } catch {
+        return res.writeHead(404,{'Content-Type':'text/plain'}).end('Printable script not available.\n')
+      }
+    }
     if (path === '/setup') return res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({pages,stops,title,camera,revision}))
     if (path === '/stage-cues') return res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(cues))
     if (path === '/events') {

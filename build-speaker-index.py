@@ -17,6 +17,25 @@ PHASES = {
     "INTERVAL": "interval", "INTERMISSION": "interval",
     "ACT II": "act2", "ACT 2": "act2", "ACT TWO": "act2",
 }
+TECHNICAL = re.compile(
+    r"(?i)^(?:SFX|TABS|BLACK\s+TABS|FULL\s+TABS|BLUE\s+TABS|FRONT\s+OF\s+TABS"
+    r"|MUSIC|SONG\s|UV\s+LIGHTING|BLACKOUT|PAGE\s|ACT\s|SCENE\s)"
+)
+
+
+def scan_brackets(text, start=0):
+    """Return (depth after the row, index just after the row last reached zero)."""
+    depth = start
+    last_zero = None
+    for index, char in enumerate(text):
+        if char in "([":
+            depth += 1
+        elif char in ")]":
+            depth -= 1
+            if depth <= 0:
+                depth = max(depth, 0)
+                last_zero = index + 1
+    return depth, last_zero
 
 
 def page_rows(page):
@@ -71,8 +90,11 @@ def add_dialogue(stop, number, spans):
     rect = fitz.Rect(spoken[0]["bbox"])
     for span in spoken[1:]:
         rect |= fitz.Rect(span["bbox"])
-    if stop["boxes"] and stop["boxes"][-1][0] == number:
-        stop["boxes"][-1][1] |= rect
+    previous = stop["boxes"][-1] if stop["boxes"] else None
+    # Merge only adjacent rows: a far-apart rect on the same page would
+    # swallow unrelated cue lines between the two.
+    if previous and previous[0] == number and rect.y0 <= previous[1].y1 + 18:
+        previous[1] |= rect
     else:
         stop["boxes"].append([number, rect])
 
@@ -83,6 +105,7 @@ def build(pdf, output, cues=(), source=None):
     has_dialogue = False
     current = None
     dialogue_left = 0
+    depth = 0
     with fitz.open(pdf) as doc:
         if doc.needs_pass or not len(doc):
             raise ValueError("Use a nonempty PDF without password protection.")
@@ -106,6 +129,7 @@ def build(pdf, output, cues=(), source=None):
                     elif next_phase == "act2" and (phase == "interval" or (phase == "act1" and has_dialogue)):
                         phase = "act2"
                     current = None
+                    depth = 0
                     continue
                 if phase == "interval":
                     continue
@@ -118,14 +142,38 @@ def build(pdf, output, cues=(), source=None):
                     if not current["boxes"]:
                         current["boxes"].append([number, fitz.Rect(first["bbox"])])
                     stops.append(current)
-                elif (
-                    current and abs(first["bbox"][0] - dialogue_left) < 14
-                    and not first["flags"] & (fitz.TEXT_FONT_ITALIC | fitz.TEXT_FONT_BOLD)
-                    and not text.startswith(("[", "("))
-                ):
-                    add_dialogue(current, number, row)
+                    label_text = " ".join(span["text"].replace("\u200b", "") for span in row).strip()
+                    depth = max(scan_brackets(label_text)[0], 0)
                 else:
-                    current = None
+                    row_text = " ".join(span["text"].replace("\u200b", "") for span in row).strip()
+                    if TECHNICAL.match(row_text.lstrip(":;.,-–— ")) or row_text.isdigit():
+                        # Cue lines and page numbers: keep the speech open, never highlight.
+                        continue
+                    end_depth, last_zero = scan_brackets(row_text, depth)
+                    trailing = row_text[last_zero:].strip() if last_zero is not None else ""
+                    if depth or row_text.startswith(("[", "(")):
+                        # Inside, opening or closing a bracketed stage direction:
+                        # only highlight a row that closes the brackets mid-row
+                        # with real dialogue after them.
+                        depth = max(end_depth, 0)
+                        if current and last_zero is not None and len(trailing) >= 15:
+                            add_dialogue(current, number, row)
+                    elif (
+                        sum(row_text.count(c) for c in "([") < sum(row_text.count(c) for c in ")]")
+                        and not trailing
+                    ):
+                        # A row that ends by closing a bracket opened earlier:
+                        # the tail of a wrapped stage direction.
+                        continue
+                    elif (
+                        current
+                        and abs(first["bbox"][0] - dialogue_left) < 14
+                        and not first["flags"] & (fitz.TEXT_FONT_ITALIC | fitz.TEXT_FONT_BOLD)
+                    ):
+                        add_dialogue(current, number, row)
+                        depth = max(scan_brackets(row_text)[0], 0)
+                    else:
+                        current = None
             phases.append(phase)
 
     def page_box(number):

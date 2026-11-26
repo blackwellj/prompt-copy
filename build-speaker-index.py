@@ -65,7 +65,7 @@ def speaker_on_row(row, width):
     label = row[0]
     if label["bbox"][0] >= width * .35:
         return None, row
-    inline = re.match(r"^([A-Z][A-Z0-9 .+/&’'-]{0,36}):\s+\S", label["text"].strip())
+    inline = re.match(r"^([A-Z][A-Z0-9 .+/&’'-]{0,36}):\s*\S", label["text"].strip())
     if inline:
         name = inline.group(1)
         if not is_heading(name):

@@ -38,6 +38,8 @@ main.inverted .box.pink{--edge:#ff99ca}
 .prompt-nav button{min-height:clamp(60px,9dvh,90px);font-size:clamp(1.15rem,3vw,1.6rem);font-weight:700;touch-action:manipulation}
 .prompt-nav [data-action="next"]{background:#b4dcff;color:#102335;border-color:#b4dcff}
 .prompt-nav button.armed{background:#ffb04d;color:#231600;border-color:#ffb04d}
+.prompt-nav #next-stop{grid-column:1/-1;text-align:center;font-size:.92rem;font-weight:600;color:#9fd6ff;padding:.05rem 0 .15rem}
+.prompt-nav #next-stop.far{color:#ffc861}
 main.controlling{padding-bottom:calc(45vh + 7rem + env(safe-area-inset-bottom))}
 header{padding-left:max(1rem,env(safe-area-inset-left),calc((100% - 58rem)/2));padding-right:max(1rem,env(safe-area-inset-right),calc((100% - 58rem)/2))}
 @media (orientation:portrait){.prompt-nav{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}}
@@ -83,7 +85,8 @@ header a{color:#d4e6ff}
 <main aria-label="Original PDF pages"></main>
 
 <nav class="prompt-nav" id="prompt-nav" aria-label="Prompt navigation" hidden>
-  <button data-action="back" type="button" disabled>Back</button>
+<b id="next-stop"></b>
+<button data-action="back" type="button" disabled>Back</button>
   <button data-action="next" type="button" disabled>Start Show</button>
 </nav>
 <script src="/show-state.js"></script>
@@ -530,6 +533,19 @@ async function start() {
     }
   }
   const nextCueEl = document.querySelector('#next-cue')
+  const nextStopEl = document.querySelector('#next-stop')
+  function pageDistance(box, fromPage, fromY) {
+    return (box[0] - fromPage) + (100*box[2]/pages[box[0]][1] - fromY)/100
+  }
+  function distanceLabel(dist) {
+    if (dist < 0.08) return 'just ahead'
+    if (dist < 1) {
+      const quarter = Math.round(dist*4)/4
+      return quarter === 0.25 ? '¼ page ahead' : quarter === 0.5 ? '½ page ahead'
+        : quarter === 0.75 ? '¾ page ahead' : 'less than a page ahead'
+    }
+    return (Math.round(dist*10)/10)+' pages ahead'
+  }
   function renderNextCue() {
     if (!stage || !stageCues || !state) return
     const stop = stops[state.index]
@@ -550,6 +566,18 @@ async function start() {
     } else near = (Math.round(dist*10)/10)+' pages ahead'
     nextCueEl.textContent = 'Next cue: '+label+' — '+near
   }
+  function renderNextStop() {
+    if (!controlling || !state) return
+    const stop = stops[state.index]
+    const next = stops[state.index+1]
+    const box = stop && stop.boxes && stop.boxes[0]
+    if (!next || !box || !next.boxes || !next.boxes[0]) { nextStopEl.hidden = true; return }
+    const fromY = 100*box[2]/pages[box[0]][1]
+    const dist = pageDistance(next.boxes[0], box[0], fromY)
+    nextStopEl.textContent = 'Next: '+next.speaker+' — '+distanceLabel(dist)
+    nextStopEl.classList.toggle('far', dist >= 1)
+    nextStopEl.hidden = false
+  }
   setInterval(renderTimers,200)
   const events = new EventSource('/events')
   function apply(next) {
@@ -566,6 +594,7 @@ async function start() {
     buttons.clock.textContent = state.running ? 'Pause timer' : 'Start timer'
     renderTimers()
     renderNextCue()
+    renderNextStop()
     if (oldState?.index===state.index && oldState.resetCount===state.resetCount) return
     if (oldState) {
       for (const box of boxesByStop[oldState.index]) box.classList.remove('active-box')

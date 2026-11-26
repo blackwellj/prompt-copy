@@ -203,6 +203,45 @@ createServer(async (req,res) => {
     for (const viewer of viewers) send(viewer)
     return res.writeHead(204).end()
   }
+  const importCors = {
+    'Access-Control-Allow-Origin':'https://script.coastalhub.uk',
+    'Access-Control-Allow-Methods':'POST,OPTIONS',
+    'Access-Control-Allow-Headers':'content-type,x-prompt-control',
+    'Access-Control-Max-Age':'86400'
+  }
+  if (req.method === 'OPTIONS' && path === '/import') return res.writeHead(204,importCors).end()
+  if (req.method === 'POST' && path === '/import') {
+    if (req.headers['x-prompt-control'] !== '1') return res.writeHead(403).end()
+    if (req.headers.origin && req.headers.origin !== importCors['Access-Control-Allow-Origin']) return res.writeHead(403).end()
+    const staged = join(timingDirectory,'staged')
+    try {
+      let body = ''
+      for await (const chunk of req) {
+        body += chunk
+        if (body.length > 24 * 1024 * 1024) return res.writeHead(413,importCors).end()
+      }
+      const incoming = JSON.parse(body)
+      if (!Array.isArray(incoming.showFile?.cues) || !incoming.showFile.cues.length ||
+          typeof incoming.pdf !== 'string' || incoming.pdf.length < 1000 ||
+          Buffer.from(incoming.pdf,'base64').length < 1000) return res.writeHead(400,importCors).end()
+      mkdirSync(staged,{recursive:true})
+      const stamp = new Date().toISOString().replace(/[:.]/g,'-')
+      const raw = join(staged,'incoming-'+stamp+'.raw.pcy')
+      writeFileSync(raw, JSON.stringify(incoming))
+      const result = JSON.parse(require('node:child_process').execFileSync(
+        '/opt/prompt-python/bin/python',['/app/flip-for-promptcopy.py',raw,join(staged,'staged-'+stamp+'.pcy')],
+        {encoding:'utf8'}))
+      const keep = require('node:fs').readdirSync(staged).sort()
+      while (keep.length > 12) require('node:fs').rmSync(join(staged,keep.shift()),{recursive:true})
+      console.log('Staged import from Stage Copy:',stamp,result.flipped,'cues')
+      return res.writeHead(200,{...importCors,'Content-Type':'application/json'})
+        .end(JSON.stringify({staged:'staged-'+stamp+'.pcy',cues:incoming.showFile.cues.length,flipped:result.flipped}))
+    } catch (error) {
+      if (error instanceof SyntaxError) return res.writeHead(400,importCors).end()
+      console.error('Import failed:',error)
+      return res.writeHead(500,importCors).end()
+    }
+  }
   res.writeHead(404).end()
 }).listen(Number(process.env.PORT || 3000), process.env.BIND || '0.0.0.0', function () {
   const url = 'http://localhost:'+this.address().port+'/'
